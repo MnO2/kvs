@@ -1,7 +1,7 @@
-use std::process;
-use std::env;
-use clap::App;
 use clap::load_yaml;
+use clap::App;
+use std::env;
+use std::process;
 
 fn main() {
     let yaml = load_yaml!("cli.yml");
@@ -26,7 +26,7 @@ fn main() {
                 app_m.usage();
                 process::exit(1);
             }
-        }, 
+        }
         ("set", Some(sub_m)) => {
             if let (Some(_), Some(_)) = (sub_m.value_of("key"), sub_m.value_of("value")) {
                 eprintln!("unimplemented");
@@ -35,7 +35,7 @@ fn main() {
                 app_m.usage();
                 process::exit(1);
             }
-        },
+        }
         ("rm", Some(sub_m)) => {
             if let Some(_) = sub_m.value_of("key") {
                 eprintln!("unimplemented");
@@ -44,7 +44,7 @@ fn main() {
                 app_m.usage();
                 process::exit(1);
             }
-        },
+        }
         _ => {
             app_m.usage();
             process::exit(1);
