@@ -1,0 +1,11 @@
+name: kvs 
+version: "0.1"
+author: Paul Meng <me@paulme.ng>
+about: key value store 
+subcommands:
+    - get:
+        about: Get the value by key.
+    - set:
+        about: Set the key value.
+    - remove:
+        about: Remove the value by key.
