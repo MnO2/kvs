@@ -2,10 +2,31 @@ name: kvs
 version: "0.1"
 author: Paul Meng <me@paulme.ng>
 about: key value store 
+args:
+  - version:
+      short: V
+      long: version
+      help: print version
+      takes_value: false
 subcommands:
     - get:
         about: Get the value by key.
+        args:
+          - key: 
+              help: key
+              index: 1
     - set:
         about: Set the key value.
-    - remove:
+        args:
+          - key: 
+              help: key and value
+              index: 1
+          - value: 
+              help: key and value
+              index: 2
+    - rm:
         about: Remove the value by key.
+        args:
+          - key: 
+              help: key
+              index: 1
