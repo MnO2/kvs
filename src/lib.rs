@@ -15,7 +15,7 @@ use std::io::prelude::*;
 use std::path::Path;
 use std::result;
 
-pub type KvsResult<T> = result::Result<T, KvsError>;
+pub type Result<T> = result::Result<T, KvsError>;
 
 #[derive(Fail, Debug)]
 pub enum KvsError {
@@ -50,7 +50,7 @@ pub struct KvStore {
 }
 
 impl KvStore {
-    pub fn open(path: &Path) -> KvsResult<Self> {
+    pub fn open(path: &Path) -> Result<Self> {
         if !path.is_dir() {
             return Err(KvsError::DataFolderNotFound);
         }
@@ -112,8 +112,8 @@ impl KvStore {
         Ok(store)
     }
 
-    pub fn get(&mut self, key: &str) -> KvsResult<Option<String>> {
-        if let Some(keyinfo) = self.keydir.get(key) {
+    pub fn get(&mut self, key: String) -> Result<Option<String>> {
+        if let Some(keyinfo) = self.keydir.get(&key) {
             let buf_reader = io::BufReader::with_capacity(1024, &self.file_handles[keyinfo.file_id as usize]);
             let mut reader = reader::Reader::new(buf_reader);
             let mut record = Record::new();
@@ -127,7 +127,7 @@ impl KvStore {
         }
     }
 
-    pub fn set(&mut self, key: String, value: String) -> KvsResult<()> {
+    pub fn set(&mut self, key: String, value: String) -> Result<()> {
         let file_offset = self.file_handles[0].seek(io::SeekFrom::End(0))?;
 
         let mut buf_record = Vec::new();
@@ -157,7 +157,7 @@ impl KvStore {
         Ok(())
     }
 
-    pub fn remove(&mut self, key: &str) -> KvsResult<()> {
+    pub fn remove(&mut self, key: String) -> Result<()> {
         unimplemented!();
     }
 }

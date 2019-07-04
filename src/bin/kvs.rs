@@ -1,11 +1,11 @@
 use clap::load_yaml;
 use clap::App;
-use kvs::{KvStore, KvsResult};
+use kvs;
 use std::env;
 use std::path::Path;
 use std::process;
 
-fn main() -> KvsResult<()> {
+fn main() -> kvs::Result<()> {
     let yaml = load_yaml!("cli.yml");
     let app_m = App::from_yaml(yaml).get_matches();
 
@@ -19,12 +19,12 @@ fn main() -> KvsResult<()> {
         process::exit(0);
     }
 
-    let mut store = KvStore::open(&Path::new("./data"))?;
+    let mut store = kvs::KvStore::open(&Path::new("./data"))?;
 
     match app_m.subcommand() {
         ("get", Some(sub_m)) => {
             if let Some(key) = sub_m.value_of("key") {
-                if let Some(value) = store.get(key)? {
+                if let Some(value) = store.get(key.to_string())? {
                     println!("{}", value);
                 } else {
                     println!("key not found");
@@ -46,7 +46,7 @@ fn main() -> KvsResult<()> {
         }
         ("rm", Some(sub_m)) => {
             if let Some(key) = sub_m.value_of("key") {
-                store.remove(key)?;
+                store.remove(key.to_string())?;
                 process::exit(1);
             } else {
                 app_m.usage();
