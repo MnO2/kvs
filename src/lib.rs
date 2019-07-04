@@ -51,8 +51,8 @@ pub struct KvStore {
 
 impl KvStore {
     pub fn open(path: &Path) -> Result<Self> {
-        if !path.is_dir() {
-            return Err(KvsError::DataFolderNotFound);
+        if !path.exists() {
+            fs::create_dir(path)?;
         }
 
         let mut active_file_handle: Option<fs::File> = None;

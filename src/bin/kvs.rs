@@ -19,7 +19,7 @@ fn main() -> kvs::Result<()> {
         process::exit(0);
     }
 
-    let mut store = kvs::KvStore::open(&Path::new("./data"))?;
+    let mut store = kvs::KvStore::open(&Path::new("./"))?;
 
     match app_m.subcommand() {
         ("get", Some(sub_m)) => {
@@ -27,9 +27,9 @@ fn main() -> kvs::Result<()> {
                 if let Some(value) = store.get(key.to_string())? {
                     println!("{}", value);
                 } else {
-                    println!("key not found");
+                    println!("Key not found");
                 }
-                process::exit(1);
+                process::exit(0);
             } else {
                 app_m.usage();
                 process::exit(1);
@@ -38,7 +38,7 @@ fn main() -> kvs::Result<()> {
         ("set", Some(sub_m)) => {
             if let (Some(key), Some(value)) = (sub_m.value_of("key"), sub_m.value_of("value")) {
                 store.set(key.to_string(), value.to_string())?;
-                process::exit(1);
+                process::exit(0);
             } else {
                 app_m.usage();
                 process::exit(1);
@@ -47,7 +47,7 @@ fn main() -> kvs::Result<()> {
         ("rm", Some(sub_m)) => {
             if let Some(key) = sub_m.value_of("key") {
                 store.remove(key.to_string())?;
-                process::exit(1);
+                process::exit(0);
             } else {
                 app_m.usage();
                 process::exit(1);
