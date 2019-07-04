@@ -1,27 +1,18 @@
+#[macro_use] extern crate failure;
+
 use std::collections::hash_map::HashMap;
 use std::path::Path;
 use std::result;
 use std::io;
 
-pub type Result<T> = result::Result<T, Error>;
+pub type Result<T> = result::Result<T, KvsError>;
 
-#[derive(Debug)]
-pub struct Error(Box<ErrorKind>);
-
-#[derive(Debug)]
-pub enum ErrorKind {
-    Io(io::Error),
-    Seek
-}
-
-pub fn new_error(kind: ErrorKind) -> Error {
-    Error(Box::new(kind))
-}
-
-impl From<io::Error> for Error {
-    fn from(err: io::Error) -> Error {
-        new_error(ErrorKind::Io(err))
-    }
+#[derive(Fail, Debug)]
+pub enum KvsError {
+    #[fail(display = "{}", _0)]
+    Io(#[cause] io::Error),
+    #[fail(display = "unknown error")]
+    Unknown,
 }
 
 pub struct KvStore {
@@ -42,7 +33,7 @@ impl KvStore {
         if let Some(value) = self.map.get(&key).map(|x| x.to_owned()) {
             Ok(Some(value))
         } else {
-            Err(new_error(ErrorKind::Seek))
+            Err(KvsError::Unknown)
         }
     }
 
