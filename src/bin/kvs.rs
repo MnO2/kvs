@@ -1,9 +1,9 @@
 use clap::load_yaml;
 use clap::App;
-use std::env;
-use std::process;
-use std::path::Path;
 use kvs::{KvStore, KvsResult};
+use std::env;
+use std::path::Path;
+use std::process;
 
 fn main() -> KvsResult<()> {
     let yaml = load_yaml!("cli.yml");

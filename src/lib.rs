@@ -1,18 +1,19 @@
-#[macro_use] extern crate failure;
+#[macro_use]
+extern crate failure;
 
 mod reader;
 mod record;
 
+use crate::record::Record;
+use byteorder::{BigEndian, WriteBytesExt};
+use rmp_serde::{Deserializer, Serializer};
+use serde::{Deserialize, Serialize};
 use std::collections::hash_map::HashMap;
+use std::fs;
+use std::io;
+use std::io::prelude::*;
 use std::path::Path;
 use std::result;
-use std::io;
-use std::fs;
-use std::io::prelude::*;
-use crate::record::Record;
-use serde::{Serialize, Deserialize};
-use rmp_serde::{Deserializer, Serializer};
-use byteorder::{BigEndian, WriteBytesExt};
 
 pub type KvsResult<T> = result::Result<T, KvsError>;
 
@@ -39,7 +40,7 @@ type Key = String;
 struct KeyInfo {
     file_id: u64,
     record_pos: u64,
-    timestamp: u64
+    timestamp: u64,
 }
 
 pub struct KvStore {
@@ -76,7 +77,6 @@ impl KvStore {
             let mut reader = reader::Reader::new(buf_reader);
             let mut record = Record::new();
 
-            
             let mut curr_offset = 0;
             let mut next_offset = 0;
             while reader.read_record(io::SeekFrom::Current(0), &mut record, &mut next_offset)? != false {
@@ -92,8 +92,8 @@ impl KvStore {
             }
         }
 
-        let store = KvStore { 
-            counter: 0,  //FIXME: read from file
+        let store = KvStore {
+            counter: 0, //FIXME: read from file
             keydir: keydir,
             file_handles: file_handles,
         };
@@ -119,7 +119,7 @@ impl KvStore {
     pub fn set(&mut self, key: String, value: String) -> KvsResult<()> {
         let file_offset = self.file_handles[0].seek(io::SeekFrom::End(0))?;
 
-         let mut buf_record = Vec::new();
+        let mut buf_record = Vec::new();
         let new_record = Record {
             timestamp: self.counter,
             key: key.clone(),
@@ -131,13 +131,13 @@ impl KvStore {
         let mut buf = Vec::new();
         buf.write_u64::<BigEndian>(record_len).unwrap();
 
-        self.file_handles[0].write(&buf)?;        
+        self.file_handles[0].write(&buf)?;
         self.file_handles[0].write(&buf_record)?;
 
         let keyinfo = KeyInfo {
             file_id: 0,
             record_pos: file_offset,
-            timestamp: self.counter 
+            timestamp: self.counter,
         };
 
         self.keydir.insert(key, keyinfo);

@@ -1,25 +1,30 @@
-use std::io;
-use std::io::BufRead;
-use std::io::Cursor;
-use std::io::prelude::*;
+use crate::record::Record;
 use byteorder::{BigEndian, ReadBytesExt};
 use rmp_serde::{Deserializer, Serializer};
-use serde::{Serialize, Deserialize};
-use crate::record::Record;
+use serde::{Deserialize, Serialize};
+use std::io;
+use std::io::prelude::*;
+use std::io::BufRead;
+use std::io::Cursor;
 
 #[derive(Debug)]
 pub(crate) struct Reader<R> {
     rdr: io::BufReader<R>,
 }
 
-impl<R: io::Read+io::Seek> Reader<R> {
+impl<R: io::Read + io::Seek> Reader<R> {
     pub(crate) fn new(rdr: R) -> Reader<R> {
         Reader {
-            rdr: io::BufReader::with_capacity(100, rdr)
+            rdr: io::BufReader::with_capacity(100, rdr),
         }
     }
 
-    pub(crate) fn read_record(&mut self, seek_from: io::SeekFrom, record: &mut Record, next_offset: &mut u64) -> io::Result<bool> {
+    pub(crate) fn read_record(
+        &mut self,
+        seek_from: io::SeekFrom,
+        record: &mut Record,
+        next_offset: &mut u64,
+    ) -> io::Result<bool> {
         self.rdr.seek(seek_from)?;
 
         let mut buf: [u8; 8] = [0; 8];

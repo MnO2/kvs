@@ -119,11 +119,7 @@ fn cli_rm_stored() -> Result<()> {
 
 #[test]
 fn cli_invalid_get() {
-    Command::cargo_bin("kvs")
-        .unwrap()
-        .args(&["get"])
-        .assert()
-        .failure();
+    Command::cargo_bin("kvs").unwrap().args(&["get"]).assert().failure();
 
     Command::cargo_bin("kvs")
         .unwrap()
@@ -134,11 +130,7 @@ fn cli_invalid_get() {
 
 #[test]
 fn cli_invalid_set() {
-    Command::cargo_bin("kvs")
-        .unwrap()
-        .args(&["set"])
-        .assert()
-        .failure();
+    Command::cargo_bin("kvs").unwrap().args(&["set"]).assert().failure();
 
     Command::cargo_bin("kvs")
         .unwrap()
@@ -155,11 +147,7 @@ fn cli_invalid_set() {
 
 #[test]
 fn cli_invalid_rm() {
-    Command::cargo_bin("kvs")
-        .unwrap()
-        .args(&["rm"])
-        .assert()
-        .failure();
+    Command::cargo_bin("kvs").unwrap().args(&["rm"]).assert().failure();
 
     Command::cargo_bin("kvs")
         .unwrap()
@@ -264,10 +252,7 @@ fn compaction() -> Result<()> {
     let dir_size = || {
         let entries = WalkDir::new(temp_dir.path()).into_iter();
         let len: walkdir::Result<u64> = entries
-            .map(|res| {
-                res.and_then(|entry| entry.metadata())
-                    .map(|metadata| metadata.len())
-            })
+            .map(|res| res.and_then(|entry| entry.metadata()).map(|metadata| metadata.len()))
             .sum();
         len.expect("fail to get directory size")
     };
