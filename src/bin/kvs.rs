@@ -2,6 +2,7 @@ use clap::load_yaml;
 use clap::App;
 use std::env;
 use std::process;
+use std::path::Path;
 use kvs::{KvStore, KvsResult};
 
 fn main() -> KvsResult<()> {
@@ -18,7 +19,7 @@ fn main() -> KvsResult<()> {
         process::exit(0);
     }
 
-    let mut store = KvStore::open("./data")?;
+    let mut store = KvStore::open(&Path::new("./data"))?;
 
     match app_m.subcommand() {
         ("get", Some(sub_m)) => {
