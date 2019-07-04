@@ -1,13 +1,18 @@
 #[macro_use] extern crate failure;
 
+mod reader;
+mod record;
+
 use std::collections::hash_map::HashMap;
 use std::path::Path;
 use std::result;
 use std::io;
 use std::fs;
+use std::io::prelude::*;
+use crate::record::Record;
 use serde::{Serialize, Deserialize};
 use rmp_serde::{Deserializer, Serializer};
-use std::io::prelude::*;
+use byteorder::{BigEndian, WriteBytesExt};
 
 pub type KvsResult<T> = result::Result<T, KvsError>;
 
@@ -30,19 +35,11 @@ impl From<io::Error> for KvsError {
 type KeyDir = HashMap<Key, KeyInfo>;
 type Key = String;
 
+#[derive(Debug)]
 struct KeyInfo {
     file_id: u64,
-    record_size: u64,
     record_pos: u64,
     timestamp: u64
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-// TODO: add CRC32
-struct Record {
-    timestamp: u64,
-    key: String,
-    value: String,
 }
 
 pub struct KvStore {
@@ -66,16 +63,38 @@ impl KvStore {
             }
         }
 
+        let mut keydir: KeyDir = HashMap::new();
+        let mut file_handles = Vec::new();
         if active_file_handle.is_none() {
             active_file_handle = Some(fs::File::create(&active_file_name)?);
-        }
+            file_handles.push(active_file_handle.unwrap());
+        } else {
+            //restore the keydir
+            file_handles.push(active_file_handle.unwrap());
 
-        let mut file_handles = Vec::new();
-        file_handles.push(active_file_handle.unwrap());
+            let buf_reader = io::BufReader::with_capacity(1024, &file_handles[0]);
+            let mut reader = reader::Reader::new(buf_reader);
+            let mut record = Record::new();
+
+            
+            let mut curr_offset = 0;
+            let mut next_offset = 0;
+            while reader.read_record(io::SeekFrom::Current(0), &mut record, &mut next_offset)? != false {
+                let keyinfo = KeyInfo {
+                    file_id: 0,
+                    record_pos: curr_offset,
+                    timestamp: record.timestamp,
+                };
+
+                dbg!(&keyinfo);
+                keydir.insert(record.key.clone(), keyinfo);
+                curr_offset = next_offset;
+            }
+        }
 
         let store = KvStore { 
             counter: 0,  //FIXME: read from file
-            keydir: HashMap::new(),
+            keydir: keydir,
             file_handles: file_handles,
         };
 
@@ -84,13 +103,13 @@ impl KvStore {
 
     pub fn get(&mut self, key: &str) -> KvsResult<Option<String>> {
         if let Some(keyinfo) = self.keydir.get(key) {
-            let mut buf: Vec<u8> = Vec::with_capacity(keyinfo.record_size as usize);
+            let buf_reader = io::BufReader::with_capacity(1024, &self.file_handles[keyinfo.file_id as usize]);
+            let mut reader = reader::Reader::new(buf_reader);
+            let mut record = Record::new();
+            let mut next_offset = 0;
 
-            self.file_handles[keyinfo.file_id as usize].seek(io::SeekFrom::Start(keyinfo.record_pos))?;
-            self.file_handles[keyinfo.file_id as usize].read(&mut buf);
+            reader.read_record(io::SeekFrom::Start(keyinfo.record_pos), &mut record, &mut next_offset);
 
-            let mut de = Deserializer::new(&buf[..]);
-            let record: Record = Deserialize::deserialize(&mut de).unwrap();
             Ok(Some(record.value.clone()))
         } else {
             Ok(None)
@@ -98,24 +117,25 @@ impl KvStore {
     }
 
     pub fn set(&mut self, key: String, value: String) -> KvsResult<()> {
-        let mut buf = Vec::new();
+        let file_offset = self.file_handles[0].seek(io::SeekFrom::End(0))?;
 
+         let mut buf_record = Vec::new();
         let new_record = Record {
             timestamp: self.counter,
             key: key.clone(),
             value: value,
         };
+        new_record.serialize(&mut Serializer::new(&mut buf_record)).unwrap();
 
-        new_record.serialize(&mut Serializer::new(&mut buf)).unwrap();
+        let record_len: u64 = buf_record.len() as u64;
+        let mut buf = Vec::new();
+        buf.write_u64::<BigEndian>(record_len).unwrap();
 
-        let file_offset = self.file_handles[0].seek(io::SeekFrom::End(0))?;
-        self.file_handles[0].write(&buf)?;
-
-        let record_size: u64 = buf.len() as u64;
+        self.file_handles[0].write(&buf)?;        
+        self.file_handles[0].write(&buf_record)?;
 
         let keyinfo = KeyInfo {
             file_id: 0,
-            record_size: record_size,
             record_pos: file_offset,
             timestamp: self.counter 
         };
