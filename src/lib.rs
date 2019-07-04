@@ -4,8 +4,9 @@ use std::collections::hash_map::HashMap;
 use std::path::Path;
 use std::result;
 use std::io;
+use std::fs::File;
 
-pub type Result<T> = result::Result<T, KvsError>;
+pub type KvsResult<T> = result::Result<T, KvsError>;
 
 #[derive(Fail, Debug)]
 pub enum KvsError {
@@ -24,26 +25,27 @@ impl KvStore {
         KvStore { map: HashMap::new() }
     }
 
-    pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
+    pub fn open<P: AsRef<Path>>(path: P) -> KvsResult<Self> {
+        let file = File::open(path);
         let store = KvStore { map: HashMap::new() };
         Ok(store)
     }
 
-    pub fn get(&self, key: String) -> Result<Option<String>> {
-        if let Some(value) = self.map.get(&key).map(|x| x.to_owned()) {
+    pub fn get(&self, key: &str) -> KvsResult<Option<String>> {
+        if let Some(value) = self.map.get(key).map(|x| x.to_owned()) {
             Ok(Some(value))
         } else {
             Err(KvsError::Unknown)
         }
     }
 
-    pub fn set(&mut self, key: String, value: String) -> Result<()> {
+    pub fn set(&mut self, key: String, value: String) -> KvsResult<()> {
         self.map.insert(key, value);
         Ok(())
     }
 
-    pub fn remove(&mut self, key: String) -> Result<()> {
-        self.map.remove(&key);
+    pub fn remove(&mut self, key: &str) -> KvsResult<()> {
+        self.map.remove(key);
         Ok(())
     }
 }

@@ -2,8 +2,9 @@ use clap::load_yaml;
 use clap::App;
 use std::env;
 use std::process;
+use kvs::{KvStore, KvsResult};
 
-fn main() {
+fn main() -> KvsResult<()> {
     let yaml = load_yaml!("cli.yml");
     let app_m = App::from_yaml(yaml).get_matches();
 
@@ -17,10 +18,16 @@ fn main() {
         process::exit(0);
     }
 
+    let mut store = KvStore::open("./data")?;
+
     match app_m.subcommand() {
         ("get", Some(sub_m)) => {
-            if let Some(_) = sub_m.value_of("key") {
-                eprintln!("unimplemented");
+            if let Some(key) = sub_m.value_of("key") {
+                if let Some(value) = store.get(key)? {
+                    println!("{}", value);
+                } else {
+                    println!("key not found");
+                }
                 process::exit(1);
             } else {
                 app_m.usage();
@@ -28,8 +35,8 @@ fn main() {
             }
         }
         ("set", Some(sub_m)) => {
-            if let (Some(_), Some(_)) = (sub_m.value_of("key"), sub_m.value_of("value")) {
-                eprintln!("unimplemented");
+            if let (Some(key), Some(value)) = (sub_m.value_of("key"), sub_m.value_of("value")) {
+                store.set(key.to_string(), value.to_string())?;
                 process::exit(1);
             } else {
                 app_m.usage();
@@ -37,8 +44,8 @@ fn main() {
             }
         }
         ("rm", Some(sub_m)) => {
-            if let Some(_) = sub_m.value_of("key") {
-                eprintln!("unimplemented");
+            if let Some(key) = sub_m.value_of("key") {
+                store.remove(key)?;
                 process::exit(1);
             } else {
                 app_m.usage();
