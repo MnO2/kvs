@@ -30,7 +30,7 @@ impl<R: io::Read + io::Seek> Reader<R> {
         let mut buf: [u8; 8] = [0; 8];
         let num_of_bytes = self.rdr.read(&mut buf)?;
         dbg!(&num_of_bytes);
-        if num_of_bytes != 8 {
+        if num_of_bytes == 0 {
             return Ok(false);
         }
 
@@ -43,7 +43,7 @@ impl<R: io::Read + io::Seek> Reader<R> {
 
         let num_of_bytes = self.rdr.read(&mut buf)?;
         dbg!(&num_of_bytes);
-        if num_of_bytes < record_size {
+        if num_of_bytes == 0 {
             return Ok(false);
         }
 

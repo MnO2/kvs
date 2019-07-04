@@ -60,14 +60,25 @@ impl KvStore {
         for entry in fs::read_dir(path)? {
             let entry = entry?;
             if entry.file_name() == "active.data" {
-                active_file_handle = Some(fs::File::open(&active_file_name)?);
+                let f = fs::OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .append(true)
+                    .open(&active_file_name)?;
+                active_file_handle = Some(f);
             }
         }
 
         let mut keydir: KeyDir = HashMap::new();
         let mut file_handles = Vec::new();
         if active_file_handle.is_none() {
-            active_file_handle = Some(fs::File::create(&active_file_name)?);
+            let f = fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .append(true)
+                .create(true)
+                .open(&active_file_name)?;
+            active_file_handle = Some(f);
             file_handles.push(active_file_handle.unwrap());
         } else {
             //restore the keydir
