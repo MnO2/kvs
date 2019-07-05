@@ -46,8 +46,15 @@ fn main() -> kvs::Result<()> {
         }
         ("rm", Some(sub_m)) => {
             if let Some(key) = sub_m.value_of("key") {
-                store.remove(key.to_string())?;
-                process::exit(0);
+                match store.remove(key.to_string()) {
+                    Ok(_) => {
+                        process::exit(0);
+                    },
+                    Err(_) => {
+                        println!("Key not found");
+                        process::exit(1);
+                    }
+                }
             } else {
                 app_m.usage();
                 process::exit(1);

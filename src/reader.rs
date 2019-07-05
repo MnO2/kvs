@@ -51,6 +51,7 @@ impl<R: io::Read + io::Seek> Reader<R> {
         let deseralized_record: Record = Deserialize::deserialize(&mut de).unwrap();
 
         record.timestamp = deseralized_record.timestamp;
+        record.tombstone = deseralized_record.tombstone;
         record.key = deseralized_record.key;
         record.value = deseralized_record.value;
 

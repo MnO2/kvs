@@ -21,8 +21,8 @@ pub type Result<T> = result::Result<T, KvsError>;
 pub enum KvsError {
     #[fail(display = "{}", _0)]
     Io(#[cause] io::Error),
-    #[fail(display = "data folder not found")]
-    DataFolderNotFound,
+    #[fail(display = "Key not found")]
+    KeyNotFound,
     #[fail(display = "unknown error")]
     Unknown,
 }
@@ -97,8 +97,12 @@ impl KvStore {
                     timestamp: record.timestamp,
                 };
 
-                dbg!(&keyinfo);
-                keydir.insert(record.key.clone(), keyinfo);
+                if record.tombstone == 1 {
+                    keydir.remove(&record.key);
+                } else {
+                    keydir.insert(record.key.clone(), keyinfo);
+                }
+
                 curr_offset = next_offset;
             }
         }
@@ -133,6 +137,7 @@ impl KvStore {
         let mut buf_record = Vec::new();
         let new_record = Record {
             timestamp: self.counter,
+            tombstone: 0,
             key: key.clone(),
             value: value,
         };
@@ -158,6 +163,31 @@ impl KvStore {
     }
 
     pub fn remove(&mut self, key: String) -> Result<()> {
-        unimplemented!();
+        if !self.keydir.contains_key(&key) {
+            return Err(KvsError::KeyNotFound);
+        }
+
+        let file_offset = self.file_handles[0].seek(io::SeekFrom::End(0))?;
+
+        let mut buf_record = Vec::new();
+        let new_record = Record {
+            timestamp: self.counter,
+            tombstone: 1,
+            key: key.clone(),
+            value: "".to_string(),
+        };
+        new_record.serialize(&mut Serializer::new(&mut buf_record)).unwrap();
+
+        let record_len: u64 = buf_record.len() as u64;
+        let mut buf = Vec::new();
+        buf.write_u64::<BigEndian>(record_len).unwrap();
+
+        self.file_handles[0].write(&buf)?;
+        self.file_handles[0].write(&buf_record)?;
+
+        self.keydir.remove(&key);
+
+        self.counter += 1;
+        Ok(())
     }
 }
