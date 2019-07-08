@@ -57,56 +57,61 @@ impl KvStore {
             fs::create_dir(path)?;
         }
 
-        let mut active_file_handle: Option<fs::File> = None;
-        let active_file_name = path.join("active.bcd");
+        let mut list_of_files: Vec<(String, fs::File)> = Vec::new();
         for entry in fs::read_dir(path)? {
             let entry = entry?;
 
             if entry.path().as_path().extension() == Some(std::ffi::OsStr::new("bcd")) {
+                let file_name = entry.file_name().into_string().unwrap();
                 let f = fs::OpenOptions::new()
                     .read(true)
                     .write(true)
                     .append(true)
-                    .open(&active_file_name)?;
-                active_file_handle = Some(f);
+                    .open(&file_name)?;
+
+                list_of_files.push((file_name, f));
             }
         }
 
+        list_of_files.sort_by(|f1, f2| f1.0.cmp(&f2.0));
+
         let mut keydir: KeyDir = HashMap::new();
         let mut file_handles = Vec::new();
-        if active_file_handle.is_none() {
+        if list_of_files.is_empty() {
+            let active_file_name = format!("{:08}.bcd", 0);
             let f = fs::OpenOptions::new()
                 .read(true)
                 .write(true)
                 .append(true)
                 .create(true)
                 .open(&active_file_name)?;
-            active_file_handle = Some(f);
-            file_handles.push(active_file_handle.unwrap());
+            file_handles.push(f);
         } else {
             //restore the keydir
-            file_handles.push(active_file_handle.unwrap());
+            for (file_name, file_to_read) in list_of_files {
+                let buf_reader = io::BufReader::with_capacity(1024, &file_to_read);
+                let mut reader = reader::Reader::new(buf_reader);
+                let mut record = Record::new();
 
-            let buf_reader = io::BufReader::with_capacity(1024, &file_handles[0]);
-            let mut reader = reader::Reader::new(buf_reader);
-            let mut record = Record::new();
+                let mut curr_offset = 0;
+                let mut next_offset = 0;
+                while reader.read_record(io::SeekFrom::Current(0), &mut record, &mut next_offset)? != false {
+                    let keyinfo = KeyInfo {
+                        file_id: 0,
+                        record_pos: curr_offset,
+                        timestamp: record.timestamp,
+                    };
 
-            let mut curr_offset = 0;
-            let mut next_offset = 0;
-            while reader.read_record(io::SeekFrom::Current(0), &mut record, &mut next_offset)? != false {
-                let keyinfo = KeyInfo {
-                    file_id: 0,
-                    record_pos: curr_offset,
-                    timestamp: record.timestamp,
-                };
+                    if record.tombstone == 1 {
+                        keydir.remove(&record.key);
+                    } else {
+                        keydir.insert(record.key.clone(), keyinfo);
+                    }
 
-                if record.tombstone == 1 {
-                    keydir.remove(&record.key);
-                } else {
-                    keydir.insert(record.key.clone(), keyinfo);
+                    curr_offset = next_offset;
                 }
 
-                curr_offset = next_offset;
+                file_handles.push(file_to_read);
             }
         }
 
@@ -134,8 +139,27 @@ impl KvStore {
         }
     }
 
+    fn should_write_to_new_file(&self, f: &fs::File) -> io::Result<bool> {
+        let metadata = f.metadata()?;
+        Ok(metadata.len() > 1000)
+    }
+
     pub fn set(&mut self, key: String, value: String) -> Result<()> {
-        let file_offset = self.file_handles[0].seek(io::SeekFrom::End(0))?;
+        let mut file_to_write = if self.should_write_to_new_file(self.file_handles.last().unwrap())? {
+            let active_file_name = format!("{:08}.bcd", self.file_handles.len());
+            let f = fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .append(true)
+                .create(true)
+                .open(&active_file_name)?;
+            self.file_handles.push(f);
+            self.file_handles.last().unwrap()
+        } else {
+            self.file_handles.last().unwrap()
+        };
+
+        let file_offset = file_to_write.seek(io::SeekFrom::End(0))?;
 
         let new_record = Record {
             timestamp: self.counter,
@@ -144,8 +168,8 @@ impl KvStore {
             value: value,
         };
 
-        let mut writer = writer::Writer::new(&self.file_handles[0]);
-        writer.write_record(&new_record)?;
+        let mut writer = writer::Writer::new(file_to_write);
+        writer.write_record(&new_record);
 
         let keyinfo = KeyInfo {
             file_id: 0,
@@ -164,23 +188,31 @@ impl KvStore {
             return Err(KvsError::KeyNotFound);
         }
 
-        let file_offset = self.file_handles[0].seek(io::SeekFrom::End(0))?;
+        let mut file_to_write = if self.should_write_to_new_file(self.file_handles.last().unwrap())? {
+            let active_file_name = format!("{}.bcd", self.file_handles.len());
+            let f = fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .append(true)
+                .create(true)
+                .open(&active_file_name)?;
+            self.file_handles.push(f);
+            self.file_handles.last().unwrap()
+        } else {
+            self.file_handles.last().unwrap()
+        };
 
-        let mut buf_record = Vec::new();
+        let file_offset = file_to_write.seek(io::SeekFrom::End(0))?;
+
         let new_record = Record {
             timestamp: self.counter,
             tombstone: 1,
             key: key.clone(),
             value: "".to_string(),
         };
-        new_record.serialize(&mut Serializer::new(&mut buf_record)).unwrap();
 
-        let record_len: u64 = buf_record.len() as u64;
-        let mut buf = Vec::new();
-        buf.write_u64::<BigEndian>(record_len).unwrap();
-
-        self.file_handles[0].write(&buf)?;
-        self.file_handles[0].write(&buf_record)?;
+        let mut writer = writer::Writer::new(file_to_write);
+        writer.write_record(&new_record);
 
         self.keydir.remove(&key);
 
