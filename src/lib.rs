@@ -50,6 +50,7 @@ pub struct KvStore {
     keydir: KeyDir,
     file_handles: Vec<fs::File>,
     path: PathBuf,
+    largest_segment_seq: u64,
 }
 
 impl KvStore {
@@ -59,13 +60,18 @@ impl KvStore {
         }
 
         let mut list_of_files: Vec<(String, fs::File)> = Vec::new();
+        let mut largest_segment_seq: u64 = 0;
         for entry in fs::read_dir(path)? {
             let entry = entry?;
 
             if entry.path().as_path().extension() == Some(std::ffi::OsStr::new("bcd")) {
                 let file_name = entry.file_name().into_string().unwrap();
+
                 let file_path = path.join(&file_name);
-                let file_apth = file_path.as_path();
+                let file_path = file_path.as_path();
+
+                let segment_seq: u64 = file_path.file_stem().unwrap().to_str().unwrap().parse().unwrap();
+                largest_segment_seq = std::cmp::max(largest_segment_seq, segment_seq);
 
                 let f = fs::OpenOptions::new()
                     .read(true)
@@ -81,6 +87,8 @@ impl KvStore {
 
         let mut keydir: KeyDir = HashMap::new();
         let mut file_handles = Vec::new();
+        let mut largest_timestamp: u64 = 0;
+
         if list_of_files.is_empty() {
             let file_name = format!("{:08}.bcd", 0);
             let file_path = path.join(&file_name);
@@ -103,6 +111,8 @@ impl KvStore {
                 let mut curr_offset = 0;
                 let mut next_offset = 0;
                 while reader.read_record(io::SeekFrom::Current(0), &mut record, &mut next_offset)? != false {
+                    largest_timestamp = std::cmp::max(largest_timestamp, record.timestamp);
+
                     let keyinfo = KeyInfo {
                         file_id: file_id as u64,
                         record_pos: curr_offset,
@@ -123,10 +133,11 @@ impl KvStore {
         }
 
         let store = KvStore {
-            counter: 0, //FIXME: read from file
+            counter: largest_timestamp,
             keydir: keydir,
             file_handles: file_handles,
             path: PathBuf::from(path),
+            largest_segment_seq: largest_segment_seq,
         };
 
         Ok(store)
