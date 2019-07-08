@@ -2,6 +2,7 @@
 extern crate failure;
 
 mod reader;
+mod writer;
 mod record;
 
 use crate::record::Record;
@@ -56,16 +57,17 @@ impl KvStore {
         }
 
         let mut active_file_handle: Option<fs::File> = None;
-        let active_file_name = path.join("active.data");
+        let active_file_name = path.join("active.bcd");
         for entry in fs::read_dir(path)? {
             let entry = entry?;
-            if entry.file_name() == "active.data" {
+
+            if entry.path().as_path().extension() == Some(std::ffi::OsStr::new("bcd")) {
                 let f = fs::OpenOptions::new()
                     .read(true)
                     .write(true)
                     .append(true)
                     .open(&active_file_name)?;
-                active_file_handle = Some(f);
+                active_file_handle = Some(f);   
             }
         }
 
@@ -134,21 +136,16 @@ impl KvStore {
     pub fn set(&mut self, key: String, value: String) -> Result<()> {
         let file_offset = self.file_handles[0].seek(io::SeekFrom::End(0))?;
 
-        let mut buf_record = Vec::new();
+      
         let new_record = Record {
             timestamp: self.counter,
             tombstone: 0,
             key: key.clone(),
             value: value,
         };
-        new_record.serialize(&mut Serializer::new(&mut buf_record)).unwrap();
-
-        let record_len: u64 = buf_record.len() as u64;
-        let mut buf = Vec::new();
-        buf.write_u64::<BigEndian>(record_len).unwrap();
-
-        self.file_handles[0].write(&buf)?;
-        self.file_handles[0].write(&buf_record)?;
+  
+        let mut writer = writer::Writer::new(&self.file_handles[0]);
+        writer.write_record(&new_record)?;
 
         let keyinfo = KeyInfo {
             file_id: 0,
@@ -188,6 +185,10 @@ impl KvStore {
         self.keydir.remove(&key);
 
         self.counter += 1;
+        Ok(())
+    }
+
+    fn compaction() -> Result<()> {
         Ok(())
     }
 }
