@@ -2,8 +2,8 @@
 extern crate failure;
 
 mod reader;
-mod writer;
 mod record;
+mod writer;
 
 use crate::record::Record;
 use byteorder::{BigEndian, WriteBytesExt};
@@ -15,6 +15,7 @@ use std::io;
 use std::io::prelude::*;
 use std::path::Path;
 use std::result;
+use tempfile::tempfile;
 
 pub type Result<T> = result::Result<T, KvsError>;
 
@@ -67,7 +68,7 @@ impl KvStore {
                     .write(true)
                     .append(true)
                     .open(&active_file_name)?;
-                active_file_handle = Some(f);   
+                active_file_handle = Some(f);
             }
         }
 
@@ -136,14 +137,13 @@ impl KvStore {
     pub fn set(&mut self, key: String, value: String) -> Result<()> {
         let file_offset = self.file_handles[0].seek(io::SeekFrom::End(0))?;
 
-      
         let new_record = Record {
             timestamp: self.counter,
             tombstone: 0,
             key: key.clone(),
             value: value,
         };
-  
+
         let mut writer = writer::Writer::new(&self.file_handles[0]);
         writer.write_record(&new_record)?;
 
@@ -188,7 +188,38 @@ impl KvStore {
         Ok(())
     }
 
-    fn compaction() -> Result<()> {
-        Ok(())
+    fn compaction(&mut self, to_be_compacted: &[fs::File]) -> Result<fs::File> {
+        let mut dest_file = tempfile()?;
+        let file_id = self.file_handles.len() as u64;
+
+        for source_file in to_be_compacted {
+            let buf_reader = io::BufReader::with_capacity(1024, source_file);
+            let mut reader = reader::Reader::new(buf_reader);
+            let mut record = Record::new();
+
+            let mut curr_offset = 0;
+            let mut next_offset = 0;
+            while reader.read_record(io::SeekFrom::Current(0), &mut record, &mut next_offset)? != false {
+                if let Some(keyinfo) = self.keydir.get(&record.key) {
+                    if keyinfo.timestamp == record.timestamp {
+                        let file_offset = dest_file.seek(io::SeekFrom::End(0))?;
+                        let mut writer = writer::Writer::new(&dest_file);
+                        writer.write_record(&record)?;
+
+                        let new_key_info = KeyInfo {
+                            file_id: file_id,
+                            record_pos: file_offset,
+                            timestamp: keyinfo.timestamp,
+                        };
+
+                        self.keydir.insert(record.key.clone(), new_key_info);
+                    }
+                }
+
+                curr_offset = next_offset;
+            }
+        }
+
+        Ok(dest_file)
     }
 }

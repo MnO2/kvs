@@ -49,7 +49,7 @@ fn main() -> kvs::Result<()> {
                 match store.remove(key.to_string()) {
                     Ok(_) => {
                         process::exit(0);
-                    },
+                    }
                     Err(_) => {
                         println!("Key not found");
                         process::exit(1);

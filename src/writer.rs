@@ -9,12 +9,9 @@ pub(crate) struct Writer<W: io::Write> {
     wtr: W,
 }
 
-
 impl<W: io::Write> Writer<W> {
     pub fn new(wtr: W) -> Writer<W> {
-        Writer {
-            wtr,
-        }
+        Writer { wtr }
     }
 
     pub fn write_record(&mut self, record: &Record) -> io::Result<()> {
