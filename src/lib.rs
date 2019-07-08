@@ -13,7 +13,7 @@ use std::collections::hash_map::HashMap;
 use std::fs;
 use std::io;
 use std::io::prelude::*;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::result;
 use tempfile::tempfile;
 
@@ -49,6 +49,7 @@ pub struct KvStore {
     counter: u64,
     keydir: KeyDir,
     file_handles: Vec<fs::File>,
+    path: PathBuf,
 }
 
 impl KvStore {
@@ -63,11 +64,14 @@ impl KvStore {
 
             if entry.path().as_path().extension() == Some(std::ffi::OsStr::new("bcd")) {
                 let file_name = entry.file_name().into_string().unwrap();
+                let file_path = path.join(&file_name);
+                let file_apth = file_path.as_path();
+
                 let f = fs::OpenOptions::new()
                     .read(true)
                     .write(true)
                     .append(true)
-                    .open(&file_name)?;
+                    .open(&file_path)?;
 
                 list_of_files.push((file_name, f));
             }
@@ -78,13 +82,16 @@ impl KvStore {
         let mut keydir: KeyDir = HashMap::new();
         let mut file_handles = Vec::new();
         if list_of_files.is_empty() {
-            let active_file_name = format!("{:08}.bcd", 0);
+            let file_name = format!("{:08}.bcd", 0);
+            let file_path = path.join(&file_name);
+            let file_path = file_path.as_path();
+
             let f = fs::OpenOptions::new()
                 .read(true)
                 .write(true)
                 .append(true)
                 .create(true)
-                .open(&active_file_name)?;
+                .open(&file_path)?;
             file_handles.push(f);
         } else {
             //restore the keydir
@@ -119,6 +126,7 @@ impl KvStore {
             counter: 0, //FIXME: read from file
             keydir: keydir,
             file_handles: file_handles,
+            path: PathBuf::from(path),
         };
 
         Ok(store)
@@ -146,13 +154,16 @@ impl KvStore {
 
     pub fn set(&mut self, key: String, value: String) -> Result<()> {
         let mut file_to_write = if self.should_write_to_new_file(self.file_handles.last().unwrap())? {
-            let active_file_name = format!("{:08}.bcd", self.file_handles.len());
+            let file_name = format!("{:08}.bcd", self.file_handles.len());
+            let file_path = self.path.join(file_name);
+            let file_path = file_path.as_path();
+
             let f = fs::OpenOptions::new()
                 .read(true)
                 .write(true)
                 .append(true)
                 .create(true)
-                .open(&active_file_name)?;
+                .open(&file_path)?;
             self.file_handles.push(f);
             self.file_handles.last().unwrap()
         } else {
@@ -255,5 +266,13 @@ impl KvStore {
         }
 
         Ok(dest_file)
+    }
+}
+
+impl Drop for KvStore {
+    fn drop(&mut self) {
+        for f in self.file_handles.iter() {
+            f.sync_data();
+        }
     }
 }

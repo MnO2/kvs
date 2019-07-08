@@ -19,7 +19,8 @@ fn main() -> kvs::Result<()> {
         process::exit(0);
     }
 
-    let mut store = kvs::KvStore::open(&Path::new("./"))?;
+    let curr_path = std::env::current_dir()?;
+    let mut store = kvs::KvStore::open(&curr_path)?;
 
     match app_m.subcommand() {
         ("get", Some(sub_m)) => {
