@@ -88,7 +88,7 @@ impl KvStore {
             file_handles.push(f);
         } else {
             //restore the keydir
-            for (file_name, file_to_read) in list_of_files {
+            for (file_id, (file_name, file_to_read)) in list_of_files.into_iter().enumerate() {
                 let buf_reader = io::BufReader::with_capacity(1024, &file_to_read);
                 let mut reader = reader::Reader::new(buf_reader);
                 let mut record = Record::new();
@@ -97,7 +97,7 @@ impl KvStore {
                 let mut next_offset = 0;
                 while reader.read_record(io::SeekFrom::Current(0), &mut record, &mut next_offset)? != false {
                     let keyinfo = KeyInfo {
-                        file_id: 0,
+                        file_id: file_id as u64,
                         record_pos: curr_offset,
                         timestamp: record.timestamp,
                     };
@@ -171,8 +171,10 @@ impl KvStore {
         let mut writer = writer::Writer::new(file_to_write);
         writer.write_record(&new_record);
 
+        let file_id = (self.file_handles.len() - 1) as u64;
+
         let keyinfo = KeyInfo {
-            file_id: 0,
+            file_id: file_id,
             record_pos: file_offset,
             timestamp: self.counter,
         };

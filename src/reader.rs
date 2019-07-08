@@ -29,20 +29,17 @@ impl<R: io::Read + io::Seek> Reader<R> {
 
         let mut buf: [u8; 8] = [0; 8];
         let num_of_bytes = self.rdr.read(&mut buf)?;
-        dbg!(&num_of_bytes);
         if num_of_bytes == 0 {
             return Ok(false);
         }
 
         let mut cursor = Cursor::new(&buf);
         let record_size: usize = cursor.read_u64::<BigEndian>().unwrap() as usize;
-        dbg!(&record_size);
 
         let mut buf = Vec::new();
         buf.resize(record_size, 0);
 
         let num_of_bytes = self.rdr.read(&mut buf)?;
-        dbg!(&num_of_bytes);
         if num_of_bytes == 0 {
             return Ok(false);
         }
