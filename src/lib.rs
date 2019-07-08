@@ -15,7 +15,6 @@ use std::io;
 use std::io::prelude::*;
 use std::path::{Path, PathBuf};
 use std::result;
-use tempfile::tempfile;
 
 pub type Result<T> = result::Result<T, KvsError>;
 
@@ -40,7 +39,7 @@ type Key = String;
 
 #[derive(Debug)]
 struct KeyInfo {
-    file_id: u64,
+    file_id: String,
     record_pos: u64,
     timestamp: u64,
 }
@@ -48,7 +47,8 @@ struct KeyInfo {
 pub struct KvStore {
     counter: u64,
     keydir: KeyDir,
-    file_handles: Vec<fs::File>,
+    file_handles: HashMap<String, fs::File>,
+    file_names: Vec<String>,
     path: PathBuf,
     largest_segment_seq: u64,
 }
@@ -86,7 +86,8 @@ impl KvStore {
         list_of_files.sort_by(|f1, f2| f1.0.cmp(&f2.0));
 
         let mut keydir: KeyDir = HashMap::new();
-        let mut file_handles = Vec::new();
+        let mut file_handles = HashMap::new();
+        let mut file_names = Vec::new();
         let mut largest_timestamp: u64 = 0;
 
         if list_of_files.is_empty() {
@@ -100,10 +101,11 @@ impl KvStore {
                 .append(true)
                 .create(true)
                 .open(&file_path)?;
-            file_handles.push(f);
+            file_names.push(file_name.clone());
+            file_handles.insert(file_name, f);
         } else {
             //restore the keydir
-            for (file_id, (file_name, file_to_read)) in list_of_files.into_iter().enumerate() {
+            for (file_name, file_to_read) in list_of_files.into_iter() {
                 let buf_reader = io::BufReader::with_capacity(1024, &file_to_read);
                 let mut reader = reader::Reader::new(buf_reader);
                 let mut record = Record::new();
@@ -114,7 +116,7 @@ impl KvStore {
                     largest_timestamp = std::cmp::max(largest_timestamp, record.timestamp);
 
                     let keyinfo = KeyInfo {
-                        file_id: file_id as u64,
+                        file_id: file_name.clone(),
                         record_pos: curr_offset,
                         timestamp: record.timestamp,
                     };
@@ -128,7 +130,8 @@ impl KvStore {
                     curr_offset = next_offset;
                 }
 
-                file_handles.push(file_to_read);
+                file_names.push(file_name.clone());
+                file_handles.insert(file_name, file_to_read);
             }
         }
 
@@ -136,6 +139,7 @@ impl KvStore {
             counter: largest_timestamp,
             keydir: keydir,
             file_handles: file_handles,
+            file_names: file_names,
             path: PathBuf::from(path),
             largest_segment_seq: largest_segment_seq,
         };
@@ -145,7 +149,7 @@ impl KvStore {
 
     pub fn get(&mut self, key: String) -> Result<Option<String>> {
         if let Some(keyinfo) = self.keydir.get(&key) {
-            let buf_reader = io::BufReader::with_capacity(1024, &self.file_handles[keyinfo.file_id as usize]);
+            let buf_reader = io::BufReader::with_capacity(1024, self.file_handles.get(&keyinfo.file_id).unwrap());
             let mut reader = reader::Reader::new(buf_reader);
             let mut record = Record::new();
             let mut next_offset = 0;
@@ -158,15 +162,16 @@ impl KvStore {
         }
     }
 
-    fn should_write_to_new_file(&self, f: &fs::File) -> io::Result<bool> {
+    fn should_write_to_new_file(&self, file_name: &String) -> io::Result<bool> {
+        let f = self.file_handles.get(file_name).unwrap();
         let metadata = f.metadata()?;
         Ok(metadata.len() > 1000)
     }
 
     pub fn set(&mut self, key: String, value: String) -> Result<()> {
-        let mut file_to_write = if self.should_write_to_new_file(self.file_handles.last().unwrap())? {
-            let file_name = format!("{:08}.bcd", self.file_handles.len());
-            let file_path = self.path.join(file_name);
+        let (mut file_id, mut file_to_write) = if self.should_write_to_new_file(self.file_names.last().unwrap())? {
+            let file_name = format!("{:08}.bcd", self.largest_segment_seq + 1);
+            let file_path = self.path.join(&file_name);
             let file_path = file_path.as_path();
 
             let f = fs::OpenOptions::new()
@@ -175,10 +180,14 @@ impl KvStore {
                 .append(true)
                 .create(true)
                 .open(&file_path)?;
-            self.file_handles.push(f);
-            self.file_handles.last().unwrap()
+            self.file_handles.insert(file_name.clone(), f);
+            self.file_names.push(file_name.clone());
+            (file_name.clone(), self.file_handles.get(&file_name).unwrap())
         } else {
-            self.file_handles.last().unwrap()
+            (
+                self.file_names.last().unwrap().clone(),
+                self.file_handles.get(self.file_names.last().unwrap()).unwrap(),
+            )
         };
 
         let file_offset = file_to_write.seek(io::SeekFrom::End(0))?;
@@ -192,11 +201,8 @@ impl KvStore {
 
         let mut writer = writer::Writer::new(file_to_write);
         writer.write_record(&new_record);
-
-        let file_id = (self.file_handles.len() - 1) as u64;
-
         let keyinfo = KeyInfo {
-            file_id: file_id,
+            file_id: file_id.clone(),
             record_pos: file_offset,
             timestamp: self.counter,
         };
@@ -204,6 +210,12 @@ impl KvStore {
         self.keydir.insert(key, keyinfo);
 
         self.counter += 1;
+
+        if self.file_names.len() > 5 {
+            let range: Vec<usize> = (0..self.file_names.len()).collect();
+            self.compaction(&range);
+        }
+
         Ok(())
     }
 
@@ -212,18 +224,25 @@ impl KvStore {
             return Err(KvsError::KeyNotFound);
         }
 
-        let mut file_to_write = if self.should_write_to_new_file(self.file_handles.last().unwrap())? {
-            let active_file_name = format!("{}.bcd", self.file_handles.len());
+        let (_, mut file_to_write) = if self.should_write_to_new_file(self.file_names.last().unwrap())? {
+            let file_name = format!("{:08}.bcd", self.largest_segment_seq + 1);
+            let file_path = self.path.join(&file_name);
+            let file_path = file_path.as_path();
+
             let f = fs::OpenOptions::new()
                 .read(true)
                 .write(true)
                 .append(true)
                 .create(true)
-                .open(&active_file_name)?;
-            self.file_handles.push(f);
-            self.file_handles.last().unwrap()
+                .open(&file_path)?;
+            self.file_handles.insert(file_name.clone(), f);
+            self.file_names.push(file_name.clone());
+            (file_name.clone(), self.file_handles.get(&file_name).unwrap())
         } else {
-            self.file_handles.last().unwrap()
+            (
+                self.file_names.last().unwrap().clone(),
+                self.file_handles.get(self.file_names.last().unwrap()).unwrap(),
+            )
         };
 
         let file_offset = file_to_write.seek(io::SeekFrom::End(0))?;
@@ -244,12 +263,34 @@ impl KvStore {
         Ok(())
     }
 
-    fn compaction(&mut self, to_be_compacted: &[fs::File]) -> Result<fs::File> {
-        let mut dest_file = tempfile()?;
-        let file_id = self.file_handles.len() as u64;
+    fn compaction(&mut self, to_be_compacted: &[usize]) -> Result<()> {
+        let mut list_of_merged_path: Vec<PathBuf> = Vec::new();
+        let mut list_of_merge_file_names: Vec<String> = Vec::new();
 
-        for source_file in to_be_compacted {
-            let buf_reader = io::BufReader::with_capacity(1024, source_file);
+        for &i in to_be_compacted.iter() {
+            let file_name = &self.file_names[i];
+            let file_path = self.path.join(file_name);
+            let file_path = file_path.as_path();
+
+            let mut segment_seq_str: String = file_path.file_stem().unwrap().to_str().unwrap().to_string();
+            segment_seq_str.push('1');
+            segment_seq_str.push_str(".bcd");
+            let merged_file_path: PathBuf = self.path.join(&segment_seq_str);
+            list_of_merged_path.push(merged_file_path);
+            list_of_merge_file_names.push(segment_seq_str);
+        }
+
+        let mut curr_idx: usize = 0;
+        let mut merged_file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .append(true)
+            .open(&list_of_merged_path[curr_idx])?;
+
+        let mut list_of_merge_files = Vec::new();
+
+        for &i in to_be_compacted.iter() {
+            let buf_reader = io::BufReader::with_capacity(1024, self.file_handles.get(&self.file_names[i]).unwrap());
             let mut reader = reader::Reader::new(buf_reader);
             let mut record = Record::new();
 
@@ -258,17 +299,30 @@ impl KvStore {
             while reader.read_record(io::SeekFrom::Current(0), &mut record, &mut next_offset)? != false {
                 if let Some(keyinfo) = self.keydir.get(&record.key) {
                     if keyinfo.timestamp == record.timestamp {
-                        let file_offset = dest_file.seek(io::SeekFrom::End(0))?;
-                        let mut writer = writer::Writer::new(&dest_file);
+                        let file_offset = merged_file.seek(io::SeekFrom::End(0))?;
+                        let mut writer = writer::Writer::new(&merged_file);
                         writer.write_record(&record)?;
 
                         let new_key_info = KeyInfo {
-                            file_id: file_id,
+                            file_id: list_of_merge_file_names[curr_idx].clone(),
                             record_pos: file_offset,
                             timestamp: keyinfo.timestamp,
                         };
 
                         self.keydir.insert(record.key.clone(), new_key_info);
+
+                        let metadata = merged_file.metadata()?;
+                        if metadata.len() > 1000 {
+                            list_of_merge_files.push(merged_file);
+
+                            curr_idx += 1;
+
+                            merged_file = fs::OpenOptions::new()
+                                .read(true)
+                                .write(true)
+                                .append(true)
+                                .open(&list_of_merged_path[curr_idx])?;
+                        }
                     }
                 }
 
@@ -276,14 +330,37 @@ impl KvStore {
             }
         }
 
-        Ok(dest_file)
+        list_of_merge_files.push(merged_file);
+
+        let mut j = 0;
+        for (k, merged_file) in list_of_merge_files.into_iter().enumerate() {
+            let file_name = &self.file_names[to_be_compacted[j]];
+            let file_path = self.path.join(file_name);
+            let file_path = file_path.as_path();
+            fs::remove_file(file_path);
+
+            fs::rename(&list_of_merged_path[k], file_path);
+
+            self.file_handles.insert(file_name.clone(), merged_file);
+
+            j += 1;
+        }
+
+        while j < to_be_compacted.len() {
+            let idx = to_be_compacted[j];
+
+            self.file_handles.remove(&self.file_names[idx]);
+            self.file_names.remove(idx);
+        }
+
+        Ok(())
     }
 }
 
 impl Drop for KvStore {
     fn drop(&mut self) {
         for f in self.file_handles.iter() {
-            f.sync_data();
+            f.1.sync_data();
         }
     }
 }
