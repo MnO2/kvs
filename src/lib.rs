@@ -136,7 +136,7 @@ impl KvStore {
         }
 
         let store = KvStore {
-            counter: largest_timestamp,
+            counter: largest_timestamp + 1,
             keydir: keydir,
             file_handles: file_handles,
             file_names: file_names,
@@ -170,7 +170,8 @@ impl KvStore {
 
     pub fn set(&mut self, key: String, value: String) -> Result<()> {
         let (mut file_id, mut file_to_write) = if self.should_write_to_new_file(self.file_names.last().unwrap())? {
-            let file_name = format!("{:08}.bcd", self.largest_segment_seq + 1);
+            self.largest_segment_seq += 1;
+            let file_name = format!("{:08}.bcd", self.largest_segment_seq);
             let file_path = self.path.join(&file_name);
             let file_path = file_path.as_path();
 
@@ -211,9 +212,9 @@ impl KvStore {
 
         self.counter += 1;
 
-        if self.file_names.len() > 5 {
+        if self.file_names.len() > 2 {
             let range: Vec<usize> = (0..self.file_names.len()).collect();
-            self.compaction(&range);
+            self.compaction(&range)?;
         }
 
         Ok(())
@@ -274,7 +275,7 @@ impl KvStore {
 
             let mut segment_seq_str: String = file_path.file_stem().unwrap().to_str().unwrap().to_string();
             segment_seq_str.push('1');
-            segment_seq_str.push_str(".bcd");
+            segment_seq_str.push_str(".merge");
             let merged_file_path: PathBuf = self.path.join(&segment_seq_str);
             list_of_merged_path.push(merged_file_path);
             list_of_merge_file_names.push(segment_seq_str);
@@ -285,12 +286,17 @@ impl KvStore {
             .read(true)
             .write(true)
             .append(true)
+            .create(true)
             .open(&list_of_merged_path[curr_idx])?;
 
         let mut list_of_merge_files = Vec::new();
 
         for &i in to_be_compacted.iter() {
-            let buf_reader = io::BufReader::with_capacity(1024, self.file_handles.get(&self.file_names[i]).unwrap());
+            let source_file_name = &self.file_names[i];
+            let mut rdr = self.file_handles.get(source_file_name).unwrap();
+            rdr.seek(io::SeekFrom::Start(0));
+
+            let buf_reader = io::BufReader::with_capacity(1024, rdr);
             let mut reader = reader::Reader::new(buf_reader);
             let mut record = Record::new();
 
@@ -311,17 +317,19 @@ impl KvStore {
 
                         self.keydir.insert(record.key.clone(), new_key_info);
 
-                        let metadata = merged_file.metadata()?;
-                        if metadata.len() > 1000 {
-                            list_of_merge_files.push(merged_file);
+                        if curr_idx < list_of_merged_path.len()-1 {
+                            let metadata = merged_file.metadata()?;
+                            if metadata.len() > 1000 {
+                                list_of_merge_files.push(merged_file);
+                                curr_idx += 1;
 
-                            curr_idx += 1;
-
-                            merged_file = fs::OpenOptions::new()
-                                .read(true)
-                                .write(true)
-                                .append(true)
-                                .open(&list_of_merged_path[curr_idx])?;
+                                merged_file = fs::OpenOptions::new()
+                                    .read(true)
+                                    .write(true)
+                                    .append(true)
+                                    .create(true)
+                                    .open(&list_of_merged_path[curr_idx])?;
+                            }
                         }
                     }
                 }
@@ -331,26 +339,38 @@ impl KvStore {
         }
 
         list_of_merge_files.push(merged_file);
+        curr_idx += 1;
 
         let mut j = 0;
         for (k, merged_file) in list_of_merge_files.into_iter().enumerate() {
             let file_name = &self.file_names[to_be_compacted[j]];
             let file_path = self.path.join(file_name);
             let file_path = file_path.as_path();
-            fs::remove_file(file_path);
 
-            fs::rename(&list_of_merged_path[k], file_path);
+            fs::remove_file(file_path)?;
+            fs::rename(&list_of_merged_path[k], file_path)?;
 
             self.file_handles.insert(file_name.clone(), merged_file);
+            j += 1;
+        }
+
+        let jj = j;
+        while j < to_be_compacted.len() {
+            let idx = to_be_compacted[j];
+
+            let file_name = &self.file_names[idx];
+            let file_path = self.path.join(file_name);
+            let file_path = file_path.as_path();
+
+            self.file_handles.remove(file_name);
+            fs::remove_file(file_path)?;
 
             j += 1;
         }
 
-        while j < to_be_compacted.len() {
-            let idx = to_be_compacted[j];
-
-            self.file_handles.remove(&self.file_names[idx]);
-            self.file_names.remove(idx);
+        if jj < to_be_compacted.len() {
+            let drain_start = to_be_compacted[jj];
+            self.file_names.drain(drain_start..);
         }
 
         Ok(())
