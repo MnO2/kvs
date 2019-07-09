@@ -212,7 +212,7 @@ impl KvStore {
 
         self.counter += 1;
 
-        if self.file_names.len() > 2 {
+        if self.file_names.len() > 6 {
             let range: Vec<usize> = (0..self.file_names.len()).collect();
             self.compaction(&range)?;
         }
